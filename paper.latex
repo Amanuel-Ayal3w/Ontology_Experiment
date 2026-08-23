@@ -1,0 +1,670 @@
+\documentclass[10pt,twocolumn,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=0.85in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+\usepackage[hidelinks]{hyperref}
+\usepackage{titlesec}
+\usepackage{balance}
+\usepackage{graphicx}
+
+\titleformat{\section}{\normalfont\large\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalfont\normalsize\bfseries}{\thesubsection}{0.6em}{}
+\setlist{leftmargin=1.2em,itemsep=1pt,topsep=2pt}
+
+\title{\textbf{\large Zero-GPU Data Selection for Instruction Tuning:\\
+What Does a Free Selector Cost in Quality?}}
+
+\author{Amanuel Ayalew\\\small Gheero Association\\\small\texttt{amanuel.ayalew.et@gmail.com}}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\small
+Data selection reduces fine-tuning cost by training on a subset of a
+candidate corpus. The cost of \emph{performing} the selection is now
+routinely reported---D4 charges 888 GPU-hours of corpus encoding against a
+4{,}300 GPU-hour gross saving---but every method in this literature spends
+GPU compute to decide what to keep. We ask what happens when the selector
+spends none. We select instruction-tuning examples by \emph{ontological
+concept coverage}: examples are tagged by dictionary matching against MeSH,
+positioned by taxonomic depth, and chosen by submodular coverage
+maximisation. Every operation is string matching or graph lookup; no forward
+pass is performed; selecting from a 167k-example pool costs 42 CPU-seconds.
+We pre-registered five hypotheses with falsification criteria, including a
+placebo arm that permutes the tag-to-example correspondence while preserving
+the selection procedure exactly.
+
+\textbf{Neither pre-registered criterion was met.} On tail accuracy---the
+stratum the method was predicted to improve---coverage selection did not
+separate from uniform sampling ($+0.016$, $p=0.40$), nor from its own placebo
+($-0.007$, $p=0.71$), across three seeds. The placebo, which permutes the
+tag-to-example correspondence while leaving the procedure untouched, performs
+the same job as the real thing. Whatever modest advantage the selection arms
+hold over uniform sampling therefore survives destruction of the concept
+signal, and belongs to the \emph{geometry} of coverage-based selection---which
+favours short, tag-dense examples---rather than to ontological concept
+coverage. We report this
+as the pre-registered informative null it is: the placebo control, which
+ontology-guided selection work does not customarily run, is what separates
+this outcome from an uninterpretable one. Two results stand independently of
+the mechanism claim. First, the saturation bound
+$k^{\ast}\!\approx\!|\mathcal{C}_{\mathrm{eff}}|/m$ predicts the elbow of the
+empirical coverage curve (575 examples) but underestimates exhaustion by
+roughly sixfold (3{,}523). Second, the cost asymmetry is real and measurable,
+even where the quality it buys is not.
+\end{abstract}
+
+\section{Introduction}
+
+Fine-tuning cost scales with tokens processed, so training on a subset of a
+candidate corpus reduces cost proportionally. Which subset, and what it costs
+to decide, are separate questions.
+
+The second question is no longer neglected. D4~\cite{d4} reports that
+encoding 400B tokens with a 125M-parameter model consumed 888 GPU-hours
+against a gross saving of 4{,}300, a net 3{,}412---selection absorbed
+roughly one fifth of the benefit. D4 further observes that CPU and GPU
+compute differ in price by about two orders of magnitude, and treats its
+CPU-side steps as negligible on that basis. Subsequent work reports
+selection cost as a first-class quantity~\cite{ofa,ost,lensllm}, and a recent
+survey frames the objective as best accuracy under fixed total compute rather
+than best accuracy absolutely~\cite{survey}.
+
+We take that accounting as given rather than as our contribution, and push it
+to its limit. Every selection method in this literature spends GPU time. Even
+the efficient ones do: D4 encodes with a small model, and reported selection
+times for recent instruction-tuning selectors range from single-digit to
+several tens of GPU-hours. We ask what a selector that spends \emph{no} GPU
+time can achieve, and what it gives up.
+
+\paragraph{Approach.} A curated domain ontology supplies three things a
+learned selector must compute: labels and synonym sets built for lexical
+matching, an explicit \textsf{is-a} taxonomy, and---by extension---a notion of
+concept redundancy. Concept recognition reduces to Aho--Corasick matching and
+taxonomic positioning to a graph lookup, both on CPU. Coverage maximisation
+over the resulting concept sets is submodular and admits greedy approximation.
+No component requires a forward pass.
+
+\paragraph{Position.} We expect embedding-based selection to produce better
+subsets. Embedding proximity captures redundancy in topic, register, phrasing,
+and structure; ontological tags capture only what the ontology encodes and the
+matcher detects. The comparison is not quality against quality. It is quality
+against price, and the question is how much of the former the latter buys.
+
+\paragraph{Contributions.}
+\begin{enumerate}
+  \item A selection method for instruction tuning requiring zero GPU compute,
+        positioned as a point on the cost--quality frontier rather than as a
+        quality improvement---and the finding that its advantage over uniform
+        sampling does not survive a placebo control.
+  \item Identification and empirical measurement of a saturation bound for
+        coverage-based selection, with a diminishing-returns objective that
+        extends the usable budget range beyond it.
+  \item A pre-registered design whose placebo control, token-matched budgets,
+        and tagging diagnostics render the negative result diagnostic rather
+        than merely inconclusive: we can say which of three candidate causes
+        produced it.
+\end{enumerate}
+
+\section{Background}
+
+\subsection{Ontologies, knowledge graphs, and graphs}
+
+A graph carries no semantics. A knowledge graph adds typed entities and
+relations, recording extensional assertions. An ontology additionally
+specifies intensional structure---classes, subsumption axioms, domain and
+range constraints---with formal semantics. In description logic terms the
+ontology is the T-Box and the knowledge graph the A-Box.
+
+Two ontology-specific properties are load-bearing here. \emph{Subsumption}:
+depth is interpretable as generality only over \textsf{is-a} edges; a graph
+mixing \textsf{part-of}, \textsf{causes}, and \textsf{located-in} affords no
+such ordering. \emph{Curated lexicalisation}: ontologies ship synonym sets
+built for the string-matching task our tagger performs. Scraped knowledge
+graphs and LLM-induced triple stores supply neither reliably, which is why the
+method requires an ontology rather than a knowledge graph.
+
+We use the taxonomic backbone and nothing else. No reasoner is invoked, no
+axioms are evaluated, no triples are derived. The method transfers to any
+resource providing labels, synonyms, and an \textsf{is-a} tree.
+
+\subsection{Related work}
+
+\paragraph{Embedding-based selection.} D4~\cite{d4} clusters document
+embeddings to remove near-duplicates and maximise diversity. This is our
+closest methodological neighbour: same target (corpus redundancy), same
+framing (compute efficiency), different signal. The distinction is that its
+signal requires encoding the corpus and ours does not.
+
+\paragraph{Cost-aware selection.} OFA~\cite{ofa} tabulates selection time
+alongside fine-tuning time across six baselines; OST~\cite{ost} demonstrates
+Pareto improvement net of selection overhead; LENSLLM~\cite{lensllm} plots
+performance against FLOPs. We adopt this practice rather than introduce it.
+
+\paragraph{Ontology-guided adaptation.} OntoTune~\cite{ontotune} probes a
+model by in-context learning to identify unmastered SNOMED CT concepts and
+self-trains on them. Evontree~\cite{evontree} refines model-internal knowledge
+against ontology rules for data-scarce domains, reporting general-capability
+retention alongside domain gains. Both place the model inside the selection
+loop, operate during training, and report accuracy. We differ in using a
+model-free signal, operating wholly as preprocessing, and reporting quality
+per unit of total compute.
+
+\paragraph{The ontology-free question.} Recent work asks directly whether
+ontologies are necessary for domain adaptation or whether comparable results
+are obtainable without them~\cite{ontofree}. We regard this as the sharpest
+challenge to our approach and address it through the flat-versus-propagated
+ablation (\S\ref{sec:abl}), which isolates whether hierarchy contributes
+beyond a flat concept vocabulary.
+
+\section{Method}
+
+\subsection{Setting}
+
+Given a candidate pool $\mathcal{D}$, an ontology
+$\mathcal{O}=(\mathcal{C},\prec)$, and a token budget $B$, select
+$\mathcal{S}\subset\mathcal{D}$ with $\sum_{x\in\mathcal{S}}|x|\le B$, then
+fine-tune a base model on $\mathcal{S}$ by an otherwise standard procedure.
+
+\subsection{Symbolic tagging}
+
+For each example $x$ we compute $\phi(x)\subseteq\mathcal{C}$ by
+Aho--Corasick matching over the union of MeSH concept labels and entry terms,
+with word-boundary checking to reject matches inside larger tokens. Each
+matched concept $c$ carries depth $d(c)$, obtained directly from its MeSH tree
+number: \texttt{C14.280.647.500} has four segments, hence depth four. Ancestors
+are obtained by truncating trailing segments. MeSH is preferred to SNOMED CT
+here precisely because tree numbers encode position explicitly, avoiding both
+a breadth-first search and the polyhierarchy ambiguity that arises when a
+concept occupies several positions at different depths.
+
+Ambiguity is controlled by discarding entry terms shorter than four characters
+and those appearing in a high-frequency English list; MeSH entry terms include
+many such forms (\emph{Cold}, \emph{Range}, \emph{Character}). The discard rate
+is reported as a diagnostic rather than tuned away. A disambiguation model
+would reintroduce precisely the GPU cost the method exists to avoid.
+
+\subsection{Saturation}
+\label{sec:sat}
+
+Binary coverage saturates. Once every concept in $\mathcal{C}_{\mathrm{eff}}$
+is covered, marginal gain vanishes for all remaining candidates and selection
+degenerates to uniform sampling. For mean concepts per example $m$, greedy
+selection saturates near
+\[
+k^{\ast} \;\approx\; |\mathcal{C}_{\mathrm{eff}}| \,/\, m .
+\]
+Selecting substantially above $k^{\ast}$ is therefore uniform sampling in
+disguise, and no effect should be expected there. We measure $k^{\ast}$
+empirically before training and choose budgets that bracket it.
+
+We further replace binary coverage with a diminishing-returns objective. Let
+$n_c$ count already-selected examples covering $c$, and $|x|$ the token length
+of $x$:
+\[
+g(x)\;=\;\frac{1}{|x|}\sum_{c\in\phi(x)}\frac{w(c)}{1+n_c}.
+\]
+Repeat coverage continues to contribute with decreasing weight, keeping the
+objective informative past $k^{\ast}$. Length normalisation is not optional:
+without it the objective degenerates to selecting the longest examples, and
+since the budget is denominated in tokens, gain-per-token is the quantity of
+interest.
+
+\subsection{Selection}
+
+\begin{algorithm}[H]
+\small
+\caption{Coverage-per-token selection}
+\begin{algorithmic}[1]
+\State $\mathcal{S}\gets\emptyset$; $\;n_c\gets 0\;\forall c$; $\;b\gets 0$
+\While{$b < B$}
+  \State $x^{\ast}\gets\arg\max_{x\notin\mathcal{S}} g(x)$
+  \State $\mathcal{S}\gets\mathcal{S}\cup\{x^{\ast}\}$; $\;b\gets b+|x^{\ast}|$
+  \State $n_c\gets n_c+1\;\;\forall c\in\phi(x^{\ast})$
+\EndWhile
+\State \Return $\textsc{Shuffle}(\mathcal{S})$
+\end{algorithmic}
+\end{algorithm}
+
+The objective is monotone submodular, so greedy attains the standard $1-1/e$
+approximation; we use lazy evaluation for tractability on large pools. The
+returned set is always shuffled: greedy emits examples ordered by marginal
+gain, and preserving that order would introduce an implicit curriculum,
+confounding selection with ordering.
+
+\subsection{What the model receives}
+
+The selection stage outputs a list of example indices. Training proceeds on
+the corresponding raw text with an unmodified tokeniser, collator, and
+objective. No concept identifiers or special tokens are introduced, and the
+fine-tuned model has no inference-time dependency on $\mathcal{O}$.
+
+The corpus is not transformed into an ontological representation. Concept
+recognition produces a stand-off annotation layer used solely for subset
+selection; the training data itself remains unmodified natural language. The
+mechanism is redundancy detection in concept space: examples that are lexically
+distinct but concept-redundant are suppressed, while examples covering
+otherwise-unrepresented concepts are promoted. Three examples referring
+respectively to \emph{myocardial infarction}, \emph{heart attack}, and
+\emph{MI} share no vocabulary and are detected as redundant by dictionary
+lookup alone.
+
+\section{Hypotheses}
+
+\begin{description}[style=nextline,leftmargin=2.4em]
+  \item[H1] At matched token budget below $k^{\ast}$, coverage selection
+        yields higher tail-concept accuracy than uniform sampling.
+  \item[H2] Its selection compute is lower than embedding-based selection by
+        at least two orders of magnitude.
+  \item[H3] It is Pareto-nondominated on the quality/selection-cost frontier:
+        no method attains comparable quality at comparable or lower cost.
+  \item[H4] The advantage diminishes as the budget exceeds $k^{\ast}$ and
+        vanishes as $B\to|\mathcal{D}|$.
+  \item[H5] Gains concentrate on tail concepts; head-concept accuracy is not
+        materially degraded.
+\end{description}
+
+\paragraph{Falsification.} H3 is load-bearing and fails if uniform sampling
+matches coverage selection, since uniform sampling is also free. H1 fails if
+no budget shows a gain exceeding seed variance. The mechanism claim fails if
+the placebo arm matches the ontology arm, regardless of H1---this would
+indicate the effect arises from the \emph{shape} of coverage-based selection
+(favouring long or atypical examples) rather than from concept coverage.
+This section states the criteria as pre-registered and is left unmodified;
+\S\ref{sec:results} reports that the mechanism criterion was met in the
+negative.
+
+\paragraph{Informative negatives.} Because the contribution is frontier
+position rather than peak quality, underperforming embedding-based selection
+is a reportable outcome quantifying the price of a free selector. The
+uninformative outcome is indistinguishability from uniform sampling. Crucially,
+the budget sweep, placebo arm, and tagging diagnostics jointly distinguish
+three causes of a null---coverage failing to track learning value, operation
+above $k^{\ast}$, and insufficient tagging recall---which most negative results
+in this literature cannot separate.
+
+\section{Experimental Design}
+
+\subsection{Controls}
+
+All arms share one base checkpoint, one LoRA configuration, and identical
+optimiser, schedule, sequence length, precision, and three seeds. Set
+membership is the sole manipulated variable. Budgets are expressed in tokens,
+not examples. Total optimisation steps are fixed explicitly rather than by
+epoch: equal epochs over unequal sets yields unequal step counts and would
+confound data quality with optimisation length. A configuration hash is written
+into every run record so that matching is demonstrable rather than asserted.
+
+\subsection{Arms}
+
+\begin{table}[h]\centering\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Arm} & \textbf{Rule} & \textbf{Sel.\ cost} & \textbf{Role} \\
+\midrule
+Uniform   & random                & none & floor \\
+Length    & longest first         & none & length control \\
+\textbf{Ontology} & \textbf{coverage/token} & \textbf{CPU} & \textbf{method} \\
+Placebo   & permuted tags         & CPU  & mechanism control \\
+D4        & cluster + dedup       & 1 GPU pass & competitor \\
+\bottomrule
+\end{tabular}
+\caption{Arms grouped by selection cost. The method must exceed the zero-cost
+group to justify itself, and need only approach the GPU group to occupy the
+frontier.}
+\end{table}
+
+The placebo arm permutes which tag-set belongs to which example, preserving the
+tag distribution while destroying the correspondence, then runs the coverage
+selector unchanged. The length arm addresses the objection that coverage
+selection may merely favour longer examples.
+
+\subsection{Data and model}
+
+Candidate pool: a 200{,}000-example sample of a large biomedical instruction
+collection, at a keep ratio of roughly 2--3\%. Aggressive ratios are necessary:
+at moderate retention all methods select adequate data and arms converge.
+
+Evaluation uses a benchmark spanning specialties deliberately chosen as
+underrepresented in existing medical QA resources. This serves two purposes:
+it reduces pretraining-contamination risk, and it aligns the evaluation with
+H5, since underrepresented specialties are where a tail-coverage mechanism
+should manifest. We verify headroom by measuring zero-shot base-model accuracy
+before any fine-tuning; a base model already scoring highly would exhibit
+ceiling effects preventing arms from separating regardless of selection quality.
+
+Tagger precision and recall are validated against a biomedical QA resource
+carrying human concept annotations, rather than by manual inspection of a small
+sample.
+
+\subsection{Metrics}
+\label{sec:metrics}
+
+Quality: benchmark accuracy, reported in aggregate and stratified by concept
+frequency in the candidate pool: items are split at the median pool frequency
+of their rarest matched concept (items with no matched concept form a third,
+unattributed stratum). This item-level rule was fixed after tagging
+diagnostics but before any training run: the coarser rule assigning items to
+concept-set partitions yields an empty tail stratum on our evaluation set,
+because concepts appearing once in the pool never appear in exam questions. The stratification is mechanism evidence: a flat aggregate gain without
+head/tail structure suggests something other than concept coverage is
+operating. Tags are computed on the evaluation set for stratification only,
+through a code path separate from selection.
+
+Cost: selection wall-clock, CPU-seconds, and GPU-seconds, measured for all
+selectors on the same corpus and the same machine. Citing published GPU-hour
+figures from prior work against our own timings would compare different corpora
+on different hardware and is not a comparison. Encoder cost is additionally
+reported as $2P'T$ FLOPs and training cost as $6PT$.
+
+\subsection{Ablations}
+\label{sec:abl}
+
+\begin{enumerate}
+  \item \textbf{Saturation.} Measure $k^{\ast}$; compare binary against
+        diminishing-returns coverage above and below it.
+  \item \textbf{Propagation.} Flat tagging versus ancestor-propagated tagging.
+        This isolates whether the taxonomy contributes beyond a flat concept
+        vocabulary, and is the ablation that answers whether an ontology is
+        required or a keyword list would suffice.
+  \item \textbf{Weighting.} Uniform versus depth-weighted concept weights.
+  \item \textbf{Tagger.} Exact, synonym-expanded, and neural tagging. The
+        neural variant is expected to forfeit the cost advantage; reporting it
+        locates the boundary at which the method's premise fails.
+  \item \textbf{Scaling.} Selection cost for both selectors at several pool
+        sizes, establishing that the cost ratio grows with corpus size while
+        training cost does not.
+\end{enumerate}
+
+\subsection{Statistics}
+
+Three seeds per arm minimum; mean and standard deviation reported with a paired
+test across seeds. Differences within seed variance are reported as null. A
+gain smaller than the observed spread is not a result.
+
+\section{Results}
+\label{sec:results}
+
+\subsection{Corpus and tagging diagnostics}
+
+The candidate pool comprises 167{,}102 examples sampled across the 62
+English-language tasks of MedS-Ins (at most 4{,}000 per task), mean length
+${\sim}442$ tokens. MeSH 2026 restricted to categories C and D yields 15{,}756
+descriptors supplying 152{,}183 match terms after ambiguity filtering
+(discard rate $0.1\%$). Tagging finds a mean of $6.16$ directly matched
+concepts per example ($23.04$ after ancestor propagation); $11.8\%$ of
+examples receive no tags. The effective concept vocabulary is
+$|\mathcal{C}_{\mathrm{eff}}| = 13{,}253$.
+
+\subsection{Saturation measurement}
+
+The analytic bound predicts $k^{\ast} \approx 13{,}253 / 23.04 \approx 575$
+examples. Empirically (Fig.~\ref{fig:kstar}), the marginal-gain curve collapses
+at approximately the predicted point, but \emph{complete} coverage is not
+reached until 3{,}523 examples (${\sim}1.56$M tokens)---roughly $6\times$ the
+bound---because later selections increasingly overlap concepts already
+covered. The bound therefore locates the elbow, where binary coverage loses
+most of its signal, rather than exhaustion. Our pre-registered budget ladder
+brackets both points: 250k tokens sits at the elbow and 2.5M above exhaustion.
+The primary comparison uses a budget of 1M tokens (${\sim}2{,}262$ examples, a
+$1.4\%$ keep ratio), below exhaustion but in the regime where the
+diminishing-returns objective, not binary coverage, must supply the signal.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{results/tags/kstar_curve.png}
+\caption{Marginal concepts gained per greedy step (left; dashed line marks
+observed exhaustion) and cumulative concept coverage (right) on the 167k-example
+pool. The predicted $k^{\ast}=575$ matches the elbow; exhaustion arrives at
+$3{,}523$.}
+\label{fig:kstar}
+\end{figure}
+
+% BEGIN AUTOGEN training-comparisons
+\subsection{Training comparisons}
+
+Table~\ref{tab:arms} and Fig.~\ref{fig:arms} report accuracy by arm at
+the 1M-token budget, mean
+$\pm$ standard deviation across seeds (uniform: $n=3$, ontology: $n=3$, placebo: $n=3$). All arms share one base
+checkpoint, one LoRA configuration, 500 optimiser steps, and the configuration
+hash recorded in every run record.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{@{}lrccc@{}}
+\toprule
+\textbf{Arm} & \textbf{n} & \textbf{Overall} & \textbf{Head} & \textbf{Tail} \\
+\midrule
+Uniform & 3 & $0.421 \pm 0.005$ & $0.462 \pm 0.005$ & $0.441 \pm 0.011$ \\
+\textbf{Ontology} & 3 & $0.428 \pm 0.003$ & $0.474 \pm 0.002$ & $0.456 \pm 0.016$ \\
+Placebo & 3 & $0.429 \pm 0.004$ & $0.466 \pm 0.006$ & $0.463 \pm 0.018$ \\
+\bottomrule
+\end{tabular}
+\caption{Accuracy by arm, stratified by the pool frequency of each item's
+rarest matched concept. Zero-shot base accuracy is $0.423$.}
+\label{tab:arms}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{results/figures/arms.png}
+\caption{Accuracy by arm and stratum. Bars give the mean over seeds with
+standard deviation; overlaid dots are individual seeds. The seed spread
+exceeds the between-arm differences in every stratum. In the tail
+stratum---the one the method targets---the ontology and placebo arms are
+indistinguishable, and both sit within roughly one standard deviation of
+uniform sampling.}
+\label{fig:arms}
+\end{figure}
+
+Both selection arms improve slightly on uniform sampling in aggregate
+accuracy. Across the 3 paired seeds the ontology--placebo difference in tail accuracy was $-0.0236$, $-0.0196$, $+0.0235$ (mean $-0.0066$, $p=0.706$). The sign is not consistent across seeds, and the difference is far from significance: the ontology arm was not distinguishable from a selector using deliberately scrambled tags, and the pre-registered mechanism gate therefore fails---not because the placebo won, but because nothing separates them. On the H1 comparison itself---coverage selection against uniform sampling on tail accuracy---the paired difference is $+0.0156$ ($p=0.40$), with the per-seed values $+0.0117$, $-0.0079$, $+0.0431$ differing in sign. H1 is not supported: at this budget the ontology arm is indistinguishable from random selection on the stratum it was predicted to improve.
+
+We note also that uniform sampling at this budget does not improve on the
+zero-shot base model ($0.421$ against $0.423$): at a $1.4\%$ keep
+ratio, randomly chosen instruction data contributes nothing measurable, which
+is the regime in which selection was expected to matter most.
+% END AUTOGEN training-comparisons
+
+\section{Discussion}
+\label{sec:disc}
+
+\subsection{The mechanism claim is refuted}
+
+Two comparisons decide the matter, and neither favours the ontology. Against
+uniform sampling---H1's own test---coverage selection produced a tail-accuracy
+difference of $+0.016$ ($p=0.40$), with per-seed values ranging from $-0.008$
+to $+0.043$. Against its placebo the difference was $-0.007$ ($p=0.71$), also
+inconsistent in sign. Neither comparison approaches the threshold the design
+pre-committed to, and the seed-to-seed spread exceeds both effects. Since the
+placebo runs the identical greedy procedure over
+a tag assignment permuted across examples, whatever it retains cannot be
+ontological concept coverage: the correspondence between an example and its
+concepts has been destroyed while the tag \emph{distribution}, and hence the
+shape of the selection, is preserved exactly.
+
+What the two arms share is that shape. The per-token objective
+$g(x)=\frac{1}{|x|}\sum_{c}\frac{w(c)}{1+n_c}$ rewards examples that carry
+many tags relative to their length, and both arms consequently select short,
+tag-dense examples: the ontology arm retains 7{,}899 examples at the 1M-token
+budget and the placebo 10{,}688, against uniform's 2{,}383, with mean lengths
+of 127 and 94 tokens against 420. At a fixed step budget, more and shorter
+examples means more distinct instructions seen per optimiser step
+(Fig.~\ref{fig:profile}). That, not concept coverage, is the operative
+variable, and it is available for free without an ontology of any kind.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{results/figures/selection_profile.png}
+\caption{Both tag-driven arms select many short examples at the same token
+budget; the placebo, whose tags are permuted, does so most aggressively. The
+selection geometry survives permutation because the tag \emph{distribution}
+does.}
+\label{fig:profile}
+\end{figure}
+
+\subsection{Why this null is diagnostic}
+
+\S\ref{sec:sat} and the tagging diagnostics eliminate the two mundane
+explanations before they can be offered. Operation above saturation is
+excluded: the 1M-token budget selects roughly 2{,}262 examples for uniform
+against an observed exhaustion point of 3{,}523, so the objective was still
+discriminating when the subsets were chosen. Insufficient tagging recall is
+excluded: examples carry 6.16 directly matched concepts on average (23.04
+with ancestors), only $11.8\%$ receive no tag at all, and the ambiguity
+filter discards $0.1\%$ of terms. The tagger saw the corpus.
+
+What remains is the possibility flagged in \S\ref{sec:limits} as most likely:
+coverage is a proxy for learning value, and a passing mention of a rare
+concept does not teach that concept. A held-out question about an
+underrepresented specialty is not answered better because some selected
+training example named the relevant MeSH descriptor once in passing.
+
+We stress the methodological point. Without the placebo arm, the ontology
+arm's roughly one-point aggregate edge over uniform sampling would have been
+easy to read as support for the concept-coverage hypothesis, particularly had
+we reported aggregate accuracy alone rather than the stratified comparison the
+design commits to. Ontology-guided selection work does not
+customarily include such a control. We cannot say whether previously reported
+gains would survive one; we can say that ours does not.
+
+\subsection{What survives}
+
+Two results are independent of the mechanism claim. The saturation bound
+$k^{\ast}=|\mathcal{C}_{\mathrm{eff}}|/m$ locates the elbow of the empirical
+gain curve accurately (predicted 575, observed elbow in the same region) but
+understates exhaustion by roughly sixfold, because greedy selection
+increasingly re-covers concepts already held. Practitioners using coverage
+objectives should treat $k^{\ast}$ as the point past which \emph{binary}
+coverage stops discriminating, not as the point of no return; the
+diminishing-returns objective remains informative well beyond it.
+
+The cost asymmetry is also real, and larger at this scale than we expected.
+Tagging and selection over the 167k-example pool consumed 42 CPU-seconds in
+total and no GPU time. Embedding-based selection must instead push the whole
+pool---73.9M tokens---through an encoder: at $2P'T$ with a 22.7M-parameter
+MiniLM, that is $3.35\times10^{15}$ FLOPs, against $9.24\times10^{15}$ for the
+LoRA fine-tune it enables at $6PT$. The selection pass therefore costs
+\emph{36\% of the training run it is meant to make cheaper}
+(Fig.~\ref{fig:cost}), before any quality benefit is counted. Our finding is that the free alternative did not
+purchase quality attributable to the ontology---not that the asymmetry was
+overstated.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{results/figures/cost.png}
+\caption{Selection cost against the fine-tuning run it enables, at our pool
+size. Encoding the pool for embedding-based selection costs roughly a third
+of the training budget; ontological selection spends no GPU at all.}
+\label{fig:cost}
+\end{figure}
+
+We did not obtain a measured wall-clock figure for the D4 arm: it failed
+repeatedly with native crashes on the GPU tier available to us, and we report
+the analytic estimate rather than a timing from different hardware, which
+\S\ref{sec:metrics} rules out. The comparison above is therefore in FLOPs, not
+seconds.
+
+\subsection{Implications}
+
+For practitioners: we found no evidence that ontological coverage selection
+is worth implementing at this scale and budget. Its advantage over random
+selection did not reach significance on the stratum it targets, and the
+aggregate edge it does show is reproduced in full by permuted tags. If a cheap
+selector is wanted, the operative variable appears to be example length at a
+fixed step budget, which requires no ontology and no tagger.
+
+For the ontology-guided adaptation literature: the flat-versus-propagated
+ablation we proposed in \S\ref{sec:abl} now looks like the wrong question.
+The prior question is whether the concept signal contributes anything over a
+permuted control, and it should be asked first.
+
+\section{Limitations}
+\label{sec:limits}
+
+\paragraph{Coverage is a proxy.} A passing mention counts equally with
+substantive treatment. The method assumes mention approximates learning value;
+failure of this assumption is the most likely source of a null result.
+
+\paragraph{Rarity may anti-correlate with representativeness.} Coverage
+selection favours examples mentioning rare concepts, which are often atypical.
+The resulting subset may be less representative of the evaluation distribution
+than a uniform sample, providing a mechanism by which the method could
+\emph{underperform} uniform sampling rather than merely tie it.
+
+\paragraph{Signal poverty relative to embeddings.} Ontological tags capture
+only what the ontology encodes and the matcher detects, missing stylistic,
+structural, and relational redundancy that embedding proximity captures. We
+expect this to cost quality and aim to measure how much.
+
+\paragraph{The ontology is an unpriced input.} Curated ontologies embody
+substantial expert labour our accounting does not charge. The claim is scoped
+to domains where such resources already exist---the same assumption made by
+prior ontology-guided work.
+
+\paragraph{Absolute savings are modest at our scale.} At a 200{,}000-example
+pool, embedding-based selection costs GPU-minutes, not GPU-hours. The argument
+is a ratio that scales linearly with pool size while training cost scales with
+budget; the absolute figure at our scale is small by construction.
+
+\paragraph{Statistical power.} The evaluation set contains 940 items, giving
+roughly 255 items per concept-frequency stratum and a standard error near
+three percentage points on stratified accuracy. Differences below that
+threshold are undetectable by construction, and we report them as null rather
+than as small effects. Our seed count is at the pre-registered minimum, and
+the budget sweep and ablations specified in \S\ref{sec:abl} were not executed;
+this is a single-budget, single-scale (1.5B), single-domain result.
+
+\paragraph{Instruction data is already curated.} Unlike raw pretraining
+corpora, instruction collections are typically deduplicated before release,
+leaving less redundancy for any selection method to exploit. This works against
+all arms equally but lowers the ceiling on achievable gains.
+
+\section{Conclusion}
+
+We proposed ontological concept coverage as a zero-GPU selection signal for
+instruction tuning, positioned as a cheaper route to a comparable subset
+rather than a better one, and pre-registered a placebo arm to test whether
+the signal was doing the work. It was not. Coverage selection did not
+separate from uniform sampling on the stratum it targets, and it did not
+separate from the same procedure run over deliberately permuted tags. What
+modest edge the selection arms hold belongs to the geometry of per-token
+coverage selection---short, tag-dense examples---rather than to the ontology. Because the design fixes
+the budget below the measured saturation point and reports tagging recall, we
+can attribute the null to the mention-versus-learning-value gap rather than
+to operating above $k^{\ast}$ or to a tagger that missed the corpus.
+
+The negative result is the contribution we can defend. A free selector does
+beat random selection at aggressive keep ratios; an ontology is not what makes
+it work. Work claiming ontology-guided selection gains should run the permuted
+control before attributing them to the ontology.
+
+\balance
+\begin{thebibliography}{9}\small
+\bibitem{d4} Tirumala et al. D4: Improving LLM Pretraining via Document
+De-Duplication and Diversification. arXiv:2308.12284.
+\bibitem{ontotune} OntoTune: Ontology-Driven Self-training for Aligning Large
+Language Models. WWW 2025. arXiv:2502.05478.
+\bibitem{evontree} Evontree: Ontology Rule-Guided Self-Evolution of Large
+Language Models. arXiv:2510.26683.
+\bibitem{ontofree} Enhancing Domain-Specific Encoder Models with LLM-Generated
+Data: How to Leverage Ontologies, and How to Do Without Them.
+arXiv:2503.22006.
+\bibitem{ofa} Once-For-All: A Train-Once and Select-Anytime Framework for
+Multimodal Instruction Tuning. arXiv:2605.26761.
+\bibitem{ost} Efficient Data Selection for Multimodal Models via
+Incremental Optimization Utility (OST). arXiv:2605.07488.
+\bibitem{lensllm} LENSLLM: Unveiling Fine-Tuning Dynamics for LLM Selection.
+arXiv:2505.03793.
+\bibitem{survey} Unifying Data, Memory, and Compute Efficiency in LLM
+Training: A Survey. arXiv:2606.10706.
+\end{thebibliography}
+
+\end{document}

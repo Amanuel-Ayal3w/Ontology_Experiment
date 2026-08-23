@@ -1,0 +1,22 @@
+{
+  "length": {
+    "cpu_s": 0.1,
+    "wall_s": 0.1,
+    "gpu_s": 0.0
+  },
+  "ontology": {
+    "cpu_s": 42.0,
+    "wall_s": 42.0,
+    "gpu_s": 0.0
+  },
+  "placebo": {
+    "cpu_s": 43.2,
+    "wall_s": 43.2,
+    "gpu_s": 0.0
+  },
+  "uniform": {
+    "cpu_s": 0.1,
+    "wall_s": 0.1,
+    "gpu_s": 0.0
+  }
+}

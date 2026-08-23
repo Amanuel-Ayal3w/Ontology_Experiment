@@ -1,0 +1,17 @@
+{
+  "arm": "ontology",
+  "seed": 2,
+  "config_hash": "dcb6259f87b2",
+  "n_examples": 7899,
+  "n_train_tokens": 1033082,
+  "max_steps": 500,
+  "final_loss": 1.4484339981079102,
+  "train_seconds": 540.7,
+  "accuracy_overall": 0.4245,
+  "accuracy_head": 0.4724,
+  "accuracy_tail": 0.4706,
+  "accuracy_other": 0.3689,
+  "n_head": 254,
+  "n_tail": 255,
+  "n_total": 940
+}

@@ -1,0 +1,7 @@
+{
+  "select_uniform": {
+    "wall_seconds": 0.068,
+    "cpu_seconds": 0.068,
+    "n_cores": 8
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "pool_docs": 167102,
+  "pool_tokens": 73859084,
+  "ontology_selection_cpu_seconds": 42.0,
+  "ontology_selection_gpu_seconds": 0.0,
+  "d4_encoder_params": 22700000,
+  "d4_encoder_flops_2PT": 3353202413600000.0,
+  "finetune_flops_6PT": 9240000000000000.0,
+  "encoder_flops_as_pct_of_training": 36.29006941125541,
+  "note": "D4 wall-clock not obtained: repeated container failures (SIGSEGV) on the available GPU tier. Encoder cost reported analytically as 2*P'*T."
+}

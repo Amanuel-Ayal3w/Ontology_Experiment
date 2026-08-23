@@ -1,0 +1,12 @@
+{
+  "build_automaton": {
+    "wall_seconds": 0.935,
+    "cpu_seconds": 0.922,
+    "n_cores": 8
+  },
+  "tag_corpus": {
+    "wall_seconds": 37.9,
+    "cpu_seconds": 37.886,
+    "n_cores": 8
+  }
+}

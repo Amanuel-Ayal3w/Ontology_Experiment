@@ -1,0 +1,17 @@
+{
+  "arm": "uniform",
+  "seed": 1,
+  "config_hash": "dcb6259f87b2",
+  "n_examples": 2222,
+  "n_train_tokens": 649283,
+  "max_steps": 500,
+  "final_loss": 1.572020835876465,
+  "train_seconds": 575.8,
+  "accuracy_overall": 0.4255,
+  "accuracy_head": 0.4646,
+  "accuracy_tail": 0.4471,
+  "accuracy_other": 0.3898,
+  "n_head": 254,
+  "n_tail": 255,
+  "n_total": 940
+}

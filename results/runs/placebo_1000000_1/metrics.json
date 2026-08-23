@@ -1,0 +1,17 @@
+{
+  "arm": "placebo",
+  "seed": 1,
+  "config_hash": "dcb6259f87b2",
+  "n_examples": 10703,
+  "n_train_tokens": 1049981,
+  "max_steps": 500,
+  "final_loss": 1.4203508338928224,
+  "train_seconds": 542.8,
+  "accuracy_overall": 0.4287,
+  "accuracy_head": 0.4646,
+  "accuracy_tail": 0.4588,
+  "accuracy_other": 0.3898,
+  "n_head": 254,
+  "n_tail": 255,
+  "n_total": 940
+}

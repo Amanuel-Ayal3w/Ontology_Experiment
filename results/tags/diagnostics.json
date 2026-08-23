@@ -1,0 +1,11 @@
+{
+  "n_docs": 167102,
+  "mean_tags_per_doc": 23.04,
+  "mean_direct_per_doc": 6.16,
+  "zero_tag_rate": 0.118,
+  "C_eff": 13253,
+  "k_star_predicted": 575,
+  "gate_density_ok": true,
+  "gate_coverage_ok": true,
+  "tagger_discard_rate": 0.001
+}

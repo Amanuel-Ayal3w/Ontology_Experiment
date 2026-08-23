@@ -1,0 +1,23 @@
+# --- environments ---
+.venv/
+__pycache__/
+*.pyc
+
+# --- data (large, regenerable via scripts/prepare_data.py) ---
+data/
+
+# --- large derived artifacts (regenerable via scripts/01_tag.py) ---
+results/tags/tags.jsonl
+results/tags/tags.jsonl.gz
+results/tags/concepts.json
+
+# --- LaTeX build artifacts (regenerable via scripts/11_bundle.py) ---
+overleaf/
+overleaf_flat/
+*.zip
+*.aux
+*.log
+*.out
+*.bbl
+*.blg
+*.synctex.gz

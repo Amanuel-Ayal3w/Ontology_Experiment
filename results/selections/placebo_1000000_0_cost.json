@@ -1,0 +1,7 @@
+{
+  "select_placebo": {
+    "wall_seconds": 3.64,
+    "cpu_seconds": 3.638,
+    "n_cores": 8
+  }
+}

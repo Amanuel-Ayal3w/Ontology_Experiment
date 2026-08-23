@@ -1,0 +1,7 @@
+{
+  "select_length": {
+    "wall_seconds": 0.066,
+    "cpu_seconds": 0.066,
+    "n_cores": 8
+  }
+}

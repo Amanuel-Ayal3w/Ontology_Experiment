@@ -1,0 +1,7 @@
+{
+  "select_ontology": {
+    "wall_seconds": 3.23,
+    "cpu_seconds": 3.226,
+    "n_cores": 8
+  }
+}
