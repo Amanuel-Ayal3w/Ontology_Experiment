@@ -21,3 +21,7 @@ overleaf_flat/
 *.bbl
 *.blg
 *.synctex.gz
+
+# --- working notes (kept local; README.md is the only tracked doc) ---
+*.md
+!README.md
