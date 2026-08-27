@@ -214,9 +214,3 @@ Nothing inside those markers should be hand-edited.
 
 ---
 
-## Status
-
-Complete and defensible as a registered report with a diagnosed null. Not
-executed: the `d4` arm (repeated container SIGSEGVs on the available GPU tier —
-reported analytically in FLOPs, not wall-clock), the full budget sweep, the five
-ablations, and `02_validate_tagger.py` (tagger precision/recall against BioASQ).
